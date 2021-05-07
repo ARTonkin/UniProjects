@@ -1,0 +1,249 @@
+---
+title: "stats 763 assignment 1"
+author: "aton432"
+date: "7 March 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Reading Data
+```{r echo = T, results = 'hide'}
+readLines("rain2016-17.txt", 12)
+check_rain1617 = read.csv("rain2016-17.txt", skip = 9, header=T)
+check_rain1617[(nrow(check_rain1617)-10):nrow(check_rain1617),]
+rain1617 = check_rain1617[1:(nrow(check_rain1617)-6),]
+
+readLines("rain2018.txt", 12)
+check_rain18 = read.csv("rain2018.txt", skip = 9, header=T)
+check_rain18[(nrow(check_rain18)-10):nrow(check_rain18),]
+rain18 = check_rain18[1:(nrow(check_rain18)-6),]
+
+readLines("dailyakldcyclecountdata2016_updated.csv", 3)
+cycle16 = read.csv("dailyakldcyclecountdata2016_updated.csv", header=T)
+
+readLines("dailyakldcyclecountdata2017_1.csv", 3)
+cycle17 = read.csv("dailyakldcyclecountdata2017_1.csv", header=T)
+
+readLines("dailyakldcyclecountdata2018.csv", 3)
+check_cycle18 = read.csv("dailyakldcyclecountdata2018.csv", header=T)
+check_cycle18[(nrow(check_cycle18)-5):nrow(check_cycle18),]
+cycle18 = check_cycle18[1:(nrow(check_cycle18)-1),]
+
+totalcycle18 = check_cycle18[nrow(check_cycle18),]
+sum(cycle18$Archibald.Park.Cyclists, na.rm = T)
+totalcycle18$Archibald.Park.Cyclists
+```
+
+Investigating Rain Datasets
+```{r echo = T, results = 'hide'}
+unique(rain1617$Station)
+unique(rain18$Station)
+
+rain1617$Date.NZST.[1:5]
+rain18$Date.NZST.[1:5]
+
+unique(rain1617$Time.NZST.)
+unique(rain18$Time.NZST.)
+
+head(unique(rain1617$Amount.mm.))
+head(unique(rain18$Amount.mm.))
+
+unique(rain1617$Period.Hrs.)
+unique(rain18$Period.Hrs.)
+
+unique(rain1617$Freq)
+unique(rain18$Freq)
+
+rain = rbind(rain1617, rain18)
+rm(rain1617, rain18, check_rain1617, check_rain18)
+```
+
+Investigating Cycle Datasets
+```{r echo = T, results = 'hide'}
+cycle16[1:3,1:3]
+cycle17[1:3,1:3]
+cycle18[1:3,1:3]
+
+nrow(cycle16)
+nrow(cycle17)
+nrow(cycle18)
+
+ncol(cycle16)
+ncol(cycle17)
+ncol(cycle18)
+
+library(plyr)
+cycle = rbind.fill(cycle16, cycle17, cycle18)
+rm(cycle16, cycle17, cycle18, check_cycle18)
+```
+
+Date and Day Transformations
+```{r echo = T, results = 'hide'}
+rain$Day = substr(rain$Date.NZST., 7, 8)
+rain$Month = substr(rain$Date.NZST., 5, 6)
+rain$Year = substr(rain$Date.NZST., 1, 4)
+rain = rain[, !(names(rain) %in% c("Date.NZST.", "Freq", "Period.Hrs."))]
+
+
+cycle$Day.Of.Week = substr(cycle$Date, 1, 3)
+cycle$Holder = substr(cycle$Date, 5, 15)
+for (i in 1:length(cycle$Holder)){
+  if (nchar(cycle$Holder[i]) == 10){
+    cycle$Holder[i] = paste("0", cycle$Holder[i], sep="")
+  }
+}
+
+cycle$Day = substr(cycle$Holder, 1, 2)
+cycle$Month = match(substr(cycle$Holder, 4, 6),month.abb)
+for (i in 1:length(cycle$Month)){
+  if (nchar(cycle$Month[i]) == 1){
+    cycle$Month[i] = paste("0", cycle$Month[i], sep="")
+  }
+}
+cycle$Year = substr(cycle$Holder, 8, 13)
+
+cycle = cycle[, !(names(cycle) %in% c("Date", "Holder"))]
+```
+
+Merging All Data
+```{r echo = T, results = 'hide'}
+all_data = merge(rain, cycle)
+all_data = all_data[order(all_data$Year, all_data$Month, all_data$Day),]
+
+all_data$Totals = rowSums(all_data[,!(colnames(all_data) %in% c("Day", "Month", "Year",
+                                                                "Station", "Time.NZST.",
+                                                                "Amount.mm.", "Day.Of.Week"))], na.rm = T)
+```
+
+Graphing Data
+
+Plotting total count of cyclists against the amount of rainfaill will give us an idea of the shape of the data. Hexbins used due to the large number of entries. Due to the merging of the datasets, the daily counts have been repeated for each hour of the day so the count values will be inflated.
+```{r}
+library(ggplot2)
+
+ggplot(data=all_data, aes(x=Amount.mm., y=Totals))+geom_hex(data = all_data)
+```
+
+We can't see much due to the large majority of the data being clustered around the 0 rainfall mark. Let's try putting the count on a logarithmic scale so that we can see the distribution clearly. Let's also remove that 1 outlier.
+```{r}
+ggplot(all_data, aes(x = Amount.mm., y = Totals)) + stat_binhex() + 
+  scale_fill_gradient(name = "count", trans = "log", breaks = 10^(0:6)) + 
+    scale_x_continuous(limits = c(0, 32))
+```
+
+As previously stated, the large majority of our data is clustered around small values of rainfall. We seem to have slightly lower counts for higher rainfall although it is difficult to pick out a clear relationship.
+
+I have a strong feeling that the time of day will be crutial to this relationship. With most road traffic occurring during the rush hour periods, it would be reasonable to assume that rain during these times is what matters most. While we only have counts for the whole day, we do have rainfall for each hour. Let's investigate this.
+```{r}
+ggplot(all_data, aes(x = Amount.mm., y = Totals))+geom_point()+facet_wrap(~Time.NZST.)+ stat_binhex() + 
+  scale_fill_gradient(name = "count", trans = "log", breaks = 10^(0:6)) + 
+  scale_x_continuous(limits = c(0, 8))
+```
+
+The lack of definition of differing shapes is surprising, and I am not confident enough to pick up anything via eyeball. Let's try grouping data into rush hour and non rush hour variables.
+```{r}
+all_data$rush_hour = ifelse(all_data$Time.NZST. %in% c(600, 700, 1500, 1600), 1, 0)
+
+ggplot(all_data, aes(x = Amount.mm., y = Totals))+geom_point()+facet_wrap(~rush_hour)+ stat_binhex() + 
+  scale_fill_gradient(name = "count", trans = "log", breaks = 10^(0:6)) + 
+  scale_x_continuous(limits = c(0, 20))
+```
+
+While there seems to be a clear pattern from this comparison, I am still suspicious. I had predicted higher totals for lower rainfall during rush hour compared to the non-rush hour graph. The lack of points on the rush hour graph should be attributed the fact that it is less often rush hour than not rush hour.
+
+We are given that the number of cyclists varies on day of the week and seasonally so I am going to assume that all the time variables should be included in the model.
+
+All that is left to check is the station variable.
+```{r}
+ggplot(all_data, aes(x = Amount.mm., y = Totals))+geom_point()+facet_wrap(~Station)+ stat_binhex() + 
+  scale_fill_gradient(name = "count", trans = "log", breaks = 10^(0:6)) + 
+  scale_x_continuous(limits = c(0, 20))
+```
+
+Again, no difference that I feel confident enough to distinguish from random chance.
+
+
+## Model Building
+
+Let us put in all variables which may have an effect. Interactions between factors with large number of levels are unable to be computed due to the size of the vector. It would be advantageous to see if we can notice any trends that would allow us to summarise a relationship with less levels. It makes sense that there could be an important relationship between recorded rainfall and the station doing the recording, so that interaction is included.
+```{r}
+all_data$Time.NZST. = as.factor(all_data$Time.NZST.)
+fit1 = lm(Totals ~ Amount.mm.*Station+Day+Month+Year+Day.Of.Week+Time.NZST., data=all_data)
+summary(fit1)
+```
+Amount of rainfall has a large coefficient which is promising for giving evidence to the link between rainfall and number of cyclists. Station has a smaller coefficient, and more interestingly, the station - amount interaction has a similarly sized coefficient, which gives me more confidence in my hypothesis about this. As was given to us, the seasonal effect is clearly present given the large variation in coefficients in the day and date variables. Conversely, the time coefficients are very small. While this might suggest that time is not useful to us, I think it is a big mistake to make a conclusion about a time effect with the model as is. Remember that the cyclist counts are daily counts, so each day has the same count attributed to it regardless of the time. This makes me realise that it is a mistake to include time in the model as is.
+
+To be able to include the time effect properly, I believe that we will have to use amount as a sort of proxy. Putting in the time - amount interaction without the time baseline should help.
+```{r}
+fit2 = lm(Totals ~ Amount.mm.*Station+Day+Month+Year+Day.Of.Week+Time.NZST.:Amount.mm., data=all_data)
+summary(fit2)
+```
+Now this is more like it. Let's graph these coefficients to see if we can spot a trend.
+```{r}
+barplot(fit2$coefficients[54:76], names.arg = 1:23)
+```
+
+We are seeing a noticeable rush hour trend here, though it is still a bit murky due to the low values compared to the seasonal coefficients. I will try replacing the time interaction with the rush hour interaction and see what happens.
+```{r}
+rm(fit1)
+fit3 = lm(Totals ~ Amount.mm.*Station+Day+Month+Year+Day.Of.Week+rush_hour:Amount.mm., data=all_data)
+summary(fit3)
+```
+With this result, I am confident that the time of day is an important factor in rainfall's effect on cyclist numbers. Specifically, whether it rains during rush hour has a large impact. Substituting the rush hour variable for the time variable leads to very little reduction in explainability (R^2), so the simpler model is better.
+
+Lets graph the day and date coefficients to get a visualisation of the pattern. Day of week reorganised with Saturday and Sunday first and then the weekday following sequentially after that (with Friday being the baseline).
+```{r}
+par(mfrow=c(2,2), cex=.5)
+barplot(fit3$coefficients[4:33])
+barplot(fit3$coefficients[34:44])
+barplot(fit3$coefficients[45:46])
+barplot(fit3$coefficients[c(48,49,47,51,52,50)])
+dev.off()
+```
+As is expected, all four of these factors have strong patterns to them, which makes sense. The only one I am dubious about is the day variable. This is because the pattern seems a little less clear than the others, and it isn't obvious as to why there would be an effect. From here, I want to investigate various transformations of the data to see if we can reduce the size of the model. If we can manage that, computation will be less restrictive.
+
+Let's start with the most obvious one, and that is the break up of days of the week between weekday and weekend. I am a little less confident in this grouping after seeing the sinusoidal-esque coefficients, which shows a less obvious break then I would have guessed.
+```{r}
+all_data$weekday = ifelse(all_data$Day.Of.Week %in% c("Sat", "Sun"), 0, 1)
+
+fit4 = lm(Totals ~ Amount.mm.*Station+Day+Month+Year+weekday+rush_hour:Amount.mm., data=all_data)
+summary(fit4)
+```
+The weekday grouping seems to prove useful. However, this is marred by the reduction in explainability (adjusted R^2 is reduced from 0.4441 in fit3 to 0.4129). I would like to keep the original day.of.week if possible.
+
+Let's split months into seasons. I am assuming that it will have the same sort of reduction in R^2.
+```{r}
+all_data$season = rep(0, nrow(all_data))
+for (i in 1:nrow(all_data)){
+  if (all_data$Month[i] %in% c("01","02","12")) 
+    all_data$season[i] = "Summer"
+  if (all_data$Month[i] %in% c("03","04","05")) 
+    all_data$season[i] = "Autumn"
+  if (all_data$Month[i] %in% c("06","07","08")) 
+    all_data$season[i] = "Winter"
+  if (all_data$Month[i] %in% c("09","10","11")) 
+    all_data$season[i] = "Spring"
+}
+
+fit5 = lm(Totals ~ Amount.mm.*Station+Day+season+Year+weekday+rush_hour:Amount.mm., data=all_data)
+summary(fit5)
+```
+Results are expected. Most of the variation seems to be between winter and non-winter months.
+
+Since we are wanting to evaluate the effect of rainfall on number of cyclists, measuring the interaction between rainfall amount and the other variables is crucial.
+```{r}
+fit6 = lm(Totals ~ Amount.mm.*(Station+Day+season+Year+weekday)+rush_hour:Amount.mm., data=all_data)
+summary(fit6)
+```
+This model presents a few interesting points. There is a meaningful interactions between rainfall and the variables for years season, and what day of the month it is. There seems to be a lack of interaction between the rainfall and the variable for weekday. This isn't surprising in hindsight as people who have an aversion to traveling in the rain would not want to travel in the rain regardless of whether it was a weekday or not. Interestingly, which station the data comes from loses its usefulness in this model, which should indicate that it should be discarded.
+
+From these explorations, my estimate of the best description of rainfall's effect on number of total cyclists is:
+Totals ~ Amount.mm. * (Day + Month + Year) + Day.Of.Week + rush_hour:Amount.mm.
+
+
+## Conclusion
+
+We have evidence for the claim that amount of rainfall does indeed impact the number of cyclists. With seasonal, day of the week and rush hour factors controlled, we see hundreds less cyclists per day per millimetre of rain recorded. However, we can explain less than 40% of the variance in the data, the rest being attributed to chance.
